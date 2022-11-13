@@ -270,7 +270,7 @@ In any case, the loopback and broadcast addresses are extracted from the OUT_BOU
 	-f: number of messages to send in TST flooding messages (100 messages by default).
 	-V: enables the verbose option.
 	-tst: in detection mode only TST messages are sent.
-	-PT: in detection mode only PT messages are sent.
+	-pt: in detection mode only PT messages are sent.
 	
 	
 * Operating Modes: [-D,-S] -D: Enables Detect mode.
