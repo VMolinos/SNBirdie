@@ -1,0 +1,502 @@
+
+
+			                           _//_
+			                          /.__.\
+			                          \ \/ /
+			                       '__/    \ 
+			                        \-      )
+			                         \_____/
+			                ___________| |_________
+			                           " "
+			                
+
+		    
+			███████╗███╗   ██╗██████╗ ██╗██████╗ ██████╗ ██╗███████╗
+			██╔════╝████╗  ██║██╔══██╗██║██╔══██╗██╔══██╗██║██╔════╝
+			███████╗██╔██╗ ██║██████╔╝██║██████╔╝██║  ██║██║█████╗  
+			╚════██║██║╚██╗██║██╔══██╗██║██╔══██╗██║  ██║██║██╔══╝  
+			███████║██║ ╚████║██████╔╝██║██║  ██║██████╔╝██║███████╗
+			╚══════╝╚═╝  ╚═══╝╚═════╝ ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝╚══════╝
+
+	       		            by Víctor M. Molinos Santiago
+	       		                  vmolinos@jtsec.es       
+
+
+
+OVERVIEW
+--------
+
+Snitching birdie was conceived as a testing tool for testers whose main function is performed in the 
+following scenario, with Detection mode:
+
+An OUT_BOUND machine enables an interface (e.g. eth0) to establish a data communication with the 
+IN_BOUND machine via the TOE. Another interface (e.g. eth1) is used to establish a control 
+communication that bypasses the TOE, through which the traffic coming from the data line is captured. 
+In this way SNBirdie is able to send test messages from the OUT_BOUND machine, through the data 
+interface at the same time as it captures this traffic on the IN_BOUND machine and notifies the 
+OUT_BOUND machine of this.
+
+
+Ejemplo:
+
+OUT_BOUND Machine       				        IN_BOUND Machine 
+(eth1:192.168.1.100)  ......DATOS.......TOE.......DATOS......  (eth1:192.168.1.200)
+(eth2:192.168.7.14)       			               (eth0:192.168.7.17)
+         |						 	        |
+         |							        |
+         |					                        |
+         |	     	      	                			|
+         |_________________________NOTIFICACIÓN_________________________|
+
+
+> The dotted line represents the message forwarding connection that traverses the TOE, while the 
+  solid line represents the control ssh connection that bypasses the TOE.
+
+In addition SNBirdie has a default mode that simply sends the set of packets without worrying 
+about their detection on the IN_BOUND machine and a mode that allows it to send a selection of 
+the set of messages.
+
+> SNBirdie is intended for use on kali 2022.3 64bit Linux and uses Python 3 software 
+  version 3.10.5, tcpdump v4.99.1 and OpenSSH v9.0. There is no guarantee that it will work 
+  correctly on other distributions.
+  
+> SNBirdie must always be run with root permission, i.e. after executing the following command:
+	$ sudo su
+
+
+
+
+INSTALLATION
+------------
+To install SNBirdie just install the snbirdie-1.0 package using pip:
+		$ sudo pip intstall snbirdie-1.0.tar.gz
+
+
+
+
+PREVIOUS CONFIGURATION
+----------------------
+For the correct functioning of the detection mode you must make sure that the following 
+software is installed on the machines:
+
+OUT_BOUND machine: (OpenSSH v9.0)
+	
+IN_BOUND machine: (OpenSSH v9.0 and tcpdump v4.99.1)
+
+In addition, it is necessary to set up the following configuration on the machines to 
+correctly structure the correctly structure the scenario.
+
+
+1.- IN_BOUND machine configuration:
+
+	1.1.- Enable a network adapter for the ssh connection interface and another one for 
+	      the packet forwarding interface.
+	      
+	      Example:
+	 
+	      	1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+		    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+		    inet 127.0.0.1/8 scope host lo
+		       valid_lft forever preferred_lft forever
+		    inet6 ::1/128 scope host 
+		       valid_lft forever preferred_lft forever
+		2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+		    link/ether 00:50:56:80:5f:64 brd ff:ff:ff:ff:ff:ff
+		    inet 192.168.7.17/24 brd 192.168.7.255 scope global dynamic noprefixroute eth0
+		       valid_lft 104594sec preferred_lft 104594sec
+		    inet6 fe80::250:56ff:fe80:5f64/64 scope link noprefixroute 
+		       valid_lft forever preferred_lft forever
+		3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+		    link/ether 00:50:56:80:04:ee brd ff:ff:ff:ff:ff:ff
+		    inet 192.168.1.200/24 brd 192.168.1.255 scope global noprefixroute eth1
+		       valid_lft forever preferred_lft forever
+		    inet6 fe80::b42f:efa4:906e:311e/64 scope link noprefixroute 
+		       valid_lft forever preferred_lft forever
+		       
+		       
+	1.2.- Configure the routing tables to assign appropriate routes for the interfaces of point 1.1. 
+	      1.1. 
+	      
+	      Example:
+	      		Kernel IP routing table
+			Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+			0.0.0.0         192.168.7.1     0.0.0.0         UG    101    0        0 eth0
+			192.168.1.0     0.0.0.0         255.255.255.0   U     100    0        0 eth1
+			192.168.7.0     0.0.0.0         255.255.255.0   U     101    0        0 eth0
+			
+			
+	1.3.- Enable ssh connection for root user. If the machine is a Kali Linux, the procedure 
+	      is as follows 1.3.1:
+	    
+		1.3.1.- Change the root user password:
+			  $ sudo su
+			  passwd
+			
+		1.3.2.- Modify the line "PermitRootLogin prohibit-password" to "PermitRootLogin yes" 
+		        in the /etc/ssh/sshd_config file and remove the # symbol so that the line is 
+		        not interpreted as a comment. 
+		      
+		1.3.3.- Enable the ssh service:
+			  $ sudo service ssh start
+
+
+2.- Configuration of the OUT_BOUND machine:
+
+	2.1.- Install SNBirdie.
+		$ sudo su
+		$ pip install snbirdie-1.0.tar.gz
+
+	2.2.- Enable a network adapter for the ssh interface and another one for the packet forwarding 
+	      interface and configure the routing tables to assign appropriate routes for the interfaces. 
+	      Note that a route for the IPv4 Link-Local address must also be added.
+	      
+	      Example:
+
+		1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+		    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+		    inet 127.0.0.1/8 scope host lo
+		       valid_lft forever preferred_lft forever
+		    inet6 ::1/128 scope host 
+		       valid_lft forever preferred_lft forever
+		2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+		    link/ether 00:0c:29:46:86:95 brd ff:ff:ff:ff:ff:ff
+		3: eth1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+		    link/ether 00:1c:29:46:86:9f brd ff:ff:ff:ff:ff:ff
+		    inet 192.168.1.100/24 brd 192.168.1.255 scope global noprefSSixroute eth1
+		       valid_lft forever preferred_lft forever
+		    inet6 fe80::5177:4010:5b67:c85e/64 scope link noprefixroute 
+		       valid_lft forever preferred_lft forever
+		4: eth2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+		    link/ether 00:0c:29:46:86:a9 brd ff:ff:ff:ff:ff:ff
+		    inet 192.168.7.14/24 brd 192.168.7.255 scope global dynamic noprefixroute eth2
+		       valid_lft 54040sec preferred_lft 54040sec
+		    inet6 fe80::20c:29ff:fe46:86a9/64 scope link 
+		       valid_lft forever preferred_lft forever
+
+			
+			
+			Kernel IP routing table
+			Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+			default         192.168.7.1     0.0.0.0         UG    100    0        0 eth2
+			link-local      0.0.0.0         255.255.255.0   U     100    0        0 eth1
+			192.168.1.0     0.0.0.0         255.255.255.0   U     101    0        0 eth1
+			192.168.7.0     0.0.0.0         255.255.255.0   U     100    0        0 eth2
+
+
+	2.3.- Once the ssh service has been started on the IN_BOUND machine, enable the root user on the OUT_BOUND 
+	      machine and generate a pair of ssh keys for the connection with the root user of the machine IN_BOUND 
+	      machine, which will be stored in the default directory --> "~/.ssh/id_rsa.pub" (public) 
+	      and "~/.ssh/id_rsa" (private):
+		$ ssh-keygen
+		
+		Example:
+		
+			┌──(kali㉿kali)-[~/Desktop/SNBirdie]
+			└─$ ssh-keygen
+			Generating public/private rsa key pair.
+			Enter file in which to save the key (/home/kali/.ssh/id_rsa): 
+			Created directory '/home/kali/.ssh'.
+			Enter passphrase (empty for no passphrase): 
+			Enter same passphrase again: 
+			Your identification has been saved in /home/kali/.ssh/id_rsa
+			Your public key has been saved in /home/kali/.ssh/id_rsa.pub
+			The key fingerprint is:
+			SHA256:j/VM8fWGYOzjYf+p1o99YnMOTR/G13RORD1kqFJtNsM kali@kali
+			The key's randomart image is:
+			+---[RSA 3072]----+
+			|            o o++|
+			|           o E.o.|
+			|          . O o *|
+			|         . + +.*+|
+			|        S o * o+B|
+			|         + * +.++|
+			|        . . + + o|
+			|             .+*+|
+			|            .oo*B|
+			+----[SHA256]-----+
+			
+	2.4.- With the root user enabled, copy the generated public key to the default directory on the IN_BOUND 
+	      machine, i.e. --> ".ssh/authorized_keys". the IN_BOUND machine, i.e. --> ".ssh/authorized_keys".
+	    	$ ssh-copy-id root@<IN_BOUND_IP>
+	    	
+	    	Example:
+	    	
+			┌──(kali㉿kali)-[~/Desktop/SNBirdie]
+			└─$ ssh-copy-id root@192.168.74.138
+			/usr/bin/ssh-copy-id: INFO: Source of key(s) to be installed: 
+				"/home/kali/.ssh/id_rsa.pub"
+			The authenticity of host '192.168.74.138 (192.168.74.138)' 
+				can't be established.
+			ED25519 key fingerprint is SHA256:LS8On+9x7uztKKjpiOgQsarccLXNJ6gSy4336UjCqq4.
+			This key is not known by any other names
+			Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+			/usr/bin/ssh-copy-id: INFO: attempting to log in with the new key(s), 
+				to filter out any that are already installed
+			/usr/bin/ssh-copy-id: INFO: 1 key(s) remain to be installed -- if you 
+				are prompted now it is to install the new keys
+			root@192.168.74.138's password: 
+
+			Number of key(s) added: 1
+
+			Now try logging into the machine, with:   "ssh 'root@192.168.74.138'"
+			and check to make sure that only the key(s) you wanted were added.
+
+
+> The default mode, however, does not need these settings, only the data line will be used for 
+  sending messages. 
+  
+  
+ 
+ 
+PARAMETERS
+----------
+Once you have installed SNBirdie and pre-configured the scenario you can start using the program.
+
+Simply run the snbirdie command from any directory on the OUT_BOUND machine setting the values required by 
+the flags. Pay special attention to the essential parameters. 
+
+In any case, the loopback and broadcast addresses are extracted from the OUT_BOUND machine.
+
+* Version and help: [-v, -h] -v: SNBird version.
+
+	-v: SNBirdie version.
+	-h: SNBirdie help.
+		
+		
+* Options: [-d, -f, -det, -V, -tst, -pt] -d: timeout after SNBirdie.
+
+	-d: time to wait after sending a message to generate the corresponding 
+	    capture.pcap (3 seconds by default).
+	-f: number of messages to send in TST flooding messages (100 messages by default).
+	-V: enables the verbose option.
+	-tst: in detection mode only TST messages are sent.
+	-PT: in detection mode only PT messages are sent.
+	
+	
+* Operating Modes: [-D,-S] -D: Enables Detect mode.
+	
+	-D: Enables Detection mode.
+	-S: enables Selective Sender mode.
+		
+		
+* Required parameters: [-oc, -ic, -os, -ip] -oc: Interface for connection.
+
+	-oc: Interface for the control ssh connection on the OUT_BOUND machine (eth0 by default).
+	-ic: Interface for the control ssh connection on the IN_BOUND machine (eth0 by default).
+	-os: Interface for sending messages on the OUT_BOUND machine (eth0 by default).
+	-ip: IP address associated with the message listening interface on the 
+	     IN_BOUND machine. (No default value.)
+	
+
+* Optional parameters: [-multi4, -multi6, -local4, -local6].
+
+	-m4: IPv4 multicast address (default 244.0.0.1).
+	-m6: IPv6 multicast address. (ff02::1 by default).
+	-l4: IPv4 local address (169.254.0.1 by default).
+	-l6: IPv6 local address. (fe80::1 by default).
+
+
+
+
+OPERATING MODES
+---------------
+* Default Mode: {}
+	> Mode flags: [-f, -tst, -pt, -V, -os, -ip, -m4, -m6, -l4, -l6] 
+	> Required parameters: [-os, -ip]
+
+        In default mode, SNBirdie will simply send the full set of messages consecutively, 
+        one after the other. It performs a ping connection check before sending each message 
+        but does not check for its arrival on the IN_BOUND machine.
+	
+	* Output: This mode does not have an output as such, however, it is possible to view 
+	          which messages are being sent by using the -V (verbose) option.
+
+
+* Detection mode: {-D}
+	> Mode flags: [-d, -f, -tst, -pt, -V, -oc, -ic, -os, -ip, -m4, -m6, -l4, -l6] 
+	> Required parameters: [-oc, -ic, -os, -ip].
+
+	SNBirdie will follow the following algorithm for each message to be sent in detection mode:
+		1.- First ping the message listening IPv4 address on the IN_BOUND machine and wait 2 seconds 
+		    to receive a reply. The objective is to check that the TOE is not freezing the traffic 
+		    flow to that destination.
+		2.- If a response is received from the ping in point 1, then an ssh connection is established 
+		    with the root user of the IN_BOUND machine through the connection interface and a network 
+		    sniffer (tcpdump) is enabled remotely on that machine.
+		3.- Once the connection is established, a packet is made up with a key message that identifies 
+		    it and a set of 5 copies of the packet is sent through the data sending interface.
+		4.- Once the sending of messages is finished, the network sniffer waits for the time in seconds 
+		    indicated by the -d flag. After this time, a .pcap file will be generated in the snb_pcaps 
+		    folder containing the traffic captured in the IN_BOUND machine and the connection 
+		    will be closed.
+		5.- Finally, it will be checked if the capture actually contains any of the messages sent by the 
+		    OUT_BOUND machine. If the capture contains any of these messages, it will be informed with 
+		    the warning: FAIL; otherwise the warning will be: PASS.
+		6.- Return to step 1.
+		
+	* Output: at the end of the complete sending, a table with the results of the sending of the TST messages 
+	          and another one with the results of the sending of the PT messages will be shown on the screen.
+
+
+* Selective Sender Mode: {-S}
+	> Mode flags: [-d, -f, -oc, -ic, -os, -ip, -m4, -m6, -l4, -l6] 
+	> Required parameters: [-oc, -ic, -os, -ip] 
+
+	In selective send mode, the tool will print a table with the complete set of messages on the screen. 
+	The user must indicate the index of the message to be sent or alternatively it is possible to send a 
+	subset of messages, simply indicating the indexes separated by a blank space.
+	
+	Example:
+	Choose the indexes of the messages to be sent: 2 45 22
+	
+	In the example, the messages whose indexes are 2, 45 and 22 corresponding to the messages 
+	"IPv6_fragment_overlap", "TCP_Malformed" and "TCP_flood_IPv6" will be sent.
+	
+	When sending messages, the tool shall perform a connection check before and at the end of each 
+	message sent.
+	
+	* Output: the sending of the messages shall be handled in a similar way as in Detection mode with 
+	          the -V (verbose) option.
+	
+	
+> In detection mode and in selective sending mode, in addition to sending the set of messages, SNBirdie 
+  will generate a folder called snb_pcaps in the directory where it is executed. This folder will be 
+  filled with the traffic captures corresponding to the IN_BOUND machine as the program is executed. 
+  This folder will therefore be automatically deleted when starting the execution of either of these 
+  two modes.
+
+
+
+
+EXAMPLES
+--------
+snbirdie -os eth1 -ip 192.168.1.200 -f 50
+snbirdie -D -d 4 -oc eth2 -ic eth0 -os eth1 -ip 192.168.1.200 
+snbirdie -S -oc eth2 -ic eth0 -os eth1 -ip 192.168.1.200 
+
+
+
+
+ADD A NEW MESSAGE
+-----------------
+To add a new message to Snitching Birdie you will need to follow the instructions below:
+1.- Create a title for the message and add it to the tuple "tst_titles" or "pt_titles" of the 
+    "message_configurator" method included in the "snblibrary.py" library, as applicable. Note that 
+    the position where this title is placed indicates the order in which the message will be sent, 
+    and it should not occupy the first position of the tuple. By convention, it is recommended that 
+    the title of the message begins with the protocol used by the message.
+   
+2.- Make a message from the following example template and add it to the method "message_configurator" 
+    inside the for loop. For each title, an object of the "message_settings" class shall be generated 
+    and configured with the parameters indicated in the template.
+    
+    Lines 2-11 of the template define the main parameters of the object. The <mode_flag> parameter shall 
+    indicate to the detection mode whether to store the test (PASS or FAIL) to the tst table or to the 
+    pt table. The <ports> parameter is used to indicate the port(s) through which the message will be sent. 
+    In addition, this parameter can also be used to configure the number of messages sent in this test as 
+    scapy interprets that a message must be sent for each port indicated. On the other hand, the <filt> 
+    parameter indicates the type of filter that the "check" method will use on the capture corresponding 
+    to this message. This filter shall be constructed according to the BPF format.
+    
+    Two methods are included in the template, each one encapsulated inside another method that will allow 
+    patching the message object by adding the new method to it. The first one, "sender", indicates the 
+    code to send the message and the second one, "check", indicates the code to detect the message in the 
+    corresponding capture. The check method acts in two steps, in the first one (lines 37-40) the capture 
+    is filtered with the filter previously proposed by the parameter filt, and in the second step 
+    (lines 45-48) the messages that contain in their payload the identifier message, usually described by 
+    the parameter data, are searched. data parameter.
+    
+    
+    	    Example template
+	    ----------------
+	1        elif title == "TCP_Test_message": 
+	2            message.set_title(title)
+	3            message.set_mode_flag('TST')
+	4            message.set_inconclusive (False)
+	5            message.set_data(title)
+	6            message.set_ports(['8001','8002','8003','8004','8005']) 
+	7            message.set_filt("less 100 and tcp and src host " + listening_in_ip4 + " and dst host " 
+	9				 + listening_in_ip4 + " and (port " + message.ports[0] + " or port " 
+	10				 + message.ports[1] + " or port " + message.ports[2] + " or port " 
+	11				 + message.ports[3] + " or port " + message.ports[4] + ")")
+	12            
+	13            def sender_patch(target):
+	14                def sender(target,title,ports,data):
+	15                    
+	16                    # ***(Message body)***
+	17                    """
+	18                    ports = [int(x) for x in ports]
+	19                    command = scapy.IP(src=listening_in_ip4,
+	20					 dst=listening_in_ip4)/scapy.TCP(sport=ports)/data
+	21                    """
+	22		      scapy.conf_iface = sending_out_iface
+	23                    if verbose:
+	24                        print("Sending: " + purple + title + " message" + reset_color)
+	25                        scapy.send(command,iface=sending_out_iface)
+	26                        # ***(Sending the message allowing the printing of information)***
+	27                    else:
+	28                        scapy.send(command,iface=sending_out_iface,verbose=False)
+	29                        # ***(Sending the message omitting the printout of information)***
+	30                        
+	31                target.sender = types.MethodType(sender,target)
+	32            sender_patch(message)
+	33            
+	34            def check_patch(target):
+	35                def check(target,path,filt,data,verbose):
+	36                    checks = []
+	37                    if verbose:
+	38                        capture = scapy.sniff(offline=path,filter=filt) 
+	39                    else:
+	40                        capture = scapy.sniff(offline=path,filter=filt,quiet=True) 
+	41                        
+	42                    # ***(Code to confirm that the capture contains the messages. 
+	43                    #     checks.append(True) for each message contained in the capture)***  
+	44                    """
+	45                    if int(str(capture).split(" ")[1].split(":")[1]): # If there are TCP packets in pcap.
+	46                        for packet in capture: 
+	47                            if packet.haslayer("Raw") and (data in packet["Raw"].fields["load"].decode()): 
+	48                                checks.append(True)
+	49                    """
+	50                    return checks
+	51    
+	52                target.check = types.MethodType(check,target)
+	53            check_patch(message)
+	54            
+	55            messages.append(message)
+	
+	
+	With this, the application will be able to generate a new message and send it if it is using the default 
+	mode or send it, detect its arrival at the IN_BOUND machine and generate the corresponding capture if it 
+	is using the detection or selective sending mode. However, only the PASS or FAIL notification can be 
+	displayed through the verbose option by means of the -V flag in the detection mode or in the usual 
+	execution of the selective sending mode, but this result will not be included in the detection mode 
+	tables.
+	
+3.- If you want this result to be reflected in the detection mode tables, then you must include a new row in 
+    the corresponding table respecting the structure of this table. To do this you must build the custom row 
+    using the symbols defined in the TST_table and PT_table classes (─,│,┌,┐,└,┘,├,┤,┬,┴, ┼) and include it 
+    as a new element of the list "tst_table" of the "set_tst_table" method in the "TST_table" class or 
+    "pt_table" of the "set_pt_table" method in the "PT_table" class as appropriate. You must also include a 
+    new variable to the constructor of that class in the form self.titulo = '' (example: self.tcp_flood_ipv6 = '') 
+    and include a method to set the PASS or FAIL key as appropriate such as:
+    
+    def set_tcp_source_routing(self,check,run):
+        if run:
+            if check:
+                self.tcp_source_routing = self.test_fail
+            else:
+                self.tcp_source_routing = self.test_pass
+        else:
+            self.tcp_source_routing = self.test_skip
+    
+    Finally, to complete this last step, you must include a new entry in the conditional of the 
+    "table_configuration" method that allows to set PASS or FAIL the detection of this message 
+    through the corresponding method of the "TST_table" or "PT_table" class.
+    
+        elif title == "TCP_flood_IPv6":
+            table.set_tcp_tcp_flood_ipv6(check).
+
+
+
+
+
